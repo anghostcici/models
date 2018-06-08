@@ -22,7 +22,6 @@ import sys
 import numpy as np
 import unittest
 import os
-import pdb
 from inception_v4 import inception_v4
 import time
 
@@ -30,7 +29,7 @@ DATA_SIZE=224
 
 def train(net_type, use_cuda, save_dirname, is_local):
     classdim = 10
-    data_shape = [3, DATA_SIZE, DATA_SIZE] #resize the image to 3*299*299
+    data_shape = [3, DATA_SIZE, DATA_SIZE] 
     
     def fake_reader():
         while True:
@@ -42,15 +41,8 @@ def train(net_type, use_cuda, save_dirname, is_local):
     images = fluid.layers.data(name='pixel', shape=data_shape, dtype='float32')
     label = fluid.layers.data(name='label', shape=[1], dtype='int64')
 
-    if net_type == "vgg":
-        print("train vgg net")
-        net = vgg16_bn_drop(images)
-    elif net_type == "resnet":
-        print("train resnet")
-        net = resnet_cifar10(images, 32)
-    elif net_type == "inception":
+    if net_type == "inception":
         print("train inception net")
-    #    pdb.set_trace()
         net = inception_v4(img=images,class_dim=classdim)
     else:
         raise ValueError("%s network is not supported" % net_type)
@@ -194,27 +186,6 @@ class TestImageClassification(unittest.TestCase):
     def test_inceptionv4_cuda(self):
     	with self.scope_prog_guard():
             main('inception', use_cuda=True)
-    #def test_vgg_cuda(self):
-    #    with self.scope_prog_guard():
-    #        main('vgg', use_cuda=True)
-
-    #def test_resnet_cuda(self):
-    #    with self.scope_prog_guard():
-    #        main('resnet', use_cuda=True)
-    #pdb.set_trace()
-    #def test_inceptionv4_cpu(self):
-    #    with self.scope_prog_guard():
-    #        main('inception', use_cuda=False)
-
-    #def test_vgg_cpu(self):
-    #    with self.scope_prog_guard():
-    #        main('vgg', use_cuda=False)
-
-    #def test_resnet_cpu(self):
-    #    with self.scope_prog_guard():
-    #        main('resnet', use_cuda=False)
-
-
     @contextlib.contextmanager
     def scope_prog_guard(self):
         prog = fluid.Program()

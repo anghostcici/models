@@ -93,7 +93,7 @@ def vgg16_bn_drop(input):
     return fc2
 
 
-def train(net_type, use_cuda, save_dirname, is_local):
+def train(net_type, use_cuda, parallel_do, parallel_exe, save_dirname, is_local):
     classdim = 10
     data_shape = [3, 32, 32]
 
@@ -114,9 +114,13 @@ def train(net_type, use_cuda, save_dirname, is_local):
         net = resnet_cifar10(images, 32)
     else:
         raise ValueError("%s network is not supported" % net_type)
+    
+    if parallel_do:
+        print("parallel do")
+    elif parallel_exe:
+        print("parallel exe")
 
-    parallel = True
-    if parallel:
+    if parallel_do:
         places = fluid.layers.get_places()
         pd = fluid.layers.ParallelDo(places)
         with pd.do():
@@ -150,7 +154,7 @@ def train(net_type, use_cuda, save_dirname, is_local):
     optimizer = fluid.optimizer.Adam(learning_rate=0.001)
     optimize_ops, params_grads = optimizer.minimize(avg_cost)
 
-    BATCH_SIZE = 8
+    BATCH_SIZE = 64
     PASS_NUM = 1
 
     train_reader = paddle.batch(
@@ -160,25 +164,35 @@ def train(net_type, use_cuda, save_dirname, is_local):
 
     test_reader = paddle.batch(
         paddle.dataset.cifar.test10(), batch_size=BATCH_SIZE)
-
     place = fluid.CUDAPlace(0) if use_cuda else fluid.CPUPlace()
-    exe = fluid.Executor(place)
     feeder = fluid.DataFeeder(place=place, feed_list=[images, label])
     train_reader_iter=train_reader()
     data=train_reader_iter.next()
     feed_data=feeder.feed(data)
     def train_loop(main_program):
-        exe.run(fluid.default_startup_program())
-        for pass_id in range(PASS_NUM):
-            for batch_id in range(4000):
-                exe.run(main_program, feed=feed_data)
-
-                if (batch_id % 10) == 0:
-
-                    print(
-                        'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
-                        format(pass_id, batch_id + 1,
-                               0.0, 0.0, time.clock()))
+        if parallel_exe:
+            exe = fluid.Executor(place)
+            exe.run(fluid.default_startup_program())
+            exe = fluid.ParallelExecutor(loss_name=avg_cost.name, use_cuda=True, allow_op_delay=True)
+            for pass_id in range(PASS_NUM):
+                for batch_id in range(100):
+                    exe.run([],feed_dict=feed_data)
+                    if (batch_id % 10) == 0:
+                        print(
+                            'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
+                            format(pass_id, batch_id + 1,
+                                   0.0, 0.0, time.clock()))
+        else:
+            exe = fluid.Executor(place)
+            exe.run(fluid.default_startup_program())
+            for pass_id in range(PASS_NUM):
+                for batch_id in range(100):
+                    exe.run(main_program, feed=feed_data)
+                    if (batch_id % 10) == 0:
+                        print(
+                            'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
+                            format(pass_id, batch_id + 1,
+                                   0.0, 0.0, time.clock()))
     if is_local:
         train_loop(fluid.default_main_program())
     else:
@@ -238,25 +252,30 @@ def infer(use_cuda, save_dirname=None):
         print("infer results: ", results[0])
 
 
-def main(net_type, use_cuda, is_local=True):
+def main(net_type, use_cuda, parallel_do, parallel_exe, is_local=True):
     if use_cuda and not fluid.core.is_compiled_with_cuda():
         return
 
     # Directory for saving the trained model
     save_dirname = "image_classification_" + net_type + ".inference.model"
 
-    train(net_type, use_cuda, save_dirname, is_local)
+    train(net_type, use_cuda, parallel_do, parallel_exe, save_dirname, is_local)
     #infer(use_cuda, save_dirname)
 
 
 class TestImageClassification(unittest.TestCase):
-    def test_vgg_cuda(self):
+    def test_vgg_paralleldo(self):
         with self.scope_prog_guard():
-            main('vgg', use_cuda=True)
+            main('vgg', use_cuda=True, parallel_do=True, parallel_exe=False)
 
-    #def test_resnet_cuda(self):
-    #    with self.scope_prog_guard():
-    #        main('resnet', use_cuda=True)
+    def test_resnet_paralleldo(self):
+        with self.scope_prog_guard():
+            main('resnet', use_cuda=True, parallel_do=True, parallel_exe=False)
+
+    def test_resnet_parallelexe(self):
+        with self.scope_prog_guard():
+            main('resnet', use_cuda=True, parallel_do=False, parallel_exe=True)
+    
 
     #def test_vgg_cpu(self):
     #    with self.scope_prog_guard():
