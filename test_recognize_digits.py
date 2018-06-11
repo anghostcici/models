@@ -72,8 +72,10 @@ def train(nn_type,
     label = fluid.layers.data(name='label', shape=[1], dtype='int64')
 
     if nn_type == 'mlp':
+        print("train mlp")
         net_conf = mlp
     else:
+        print("train conv")
         net_conf = conv_net
 
     if parallel:
@@ -113,60 +115,33 @@ def train(nn_type,
 
     data = train_reader_iter.next()
     feed_data = feeder.feed(data)
+    fix_data_in_gpu = False
 
     def train_loop(main_program):
         exe.run(fluid.default_startup_program())
 
         PASS_NUM = 1
         for pass_id in range(PASS_NUM):
-            for batch_id in range(0,100):
+            for batch_id in range(100):
                 # train a mini-batch, fetch nothing
-                #exe.run(main_program, feed=feeder.feed(data))
-                exe.run(main_program, feed=feed_data)
+                exe.run(main_program, feed=feeder.feed(data))
+                exe.run(main_program, feed=feed_data if fix_data_in_gpu else feeder.feed(train_reader_iter.next())) 
                 if (batch_id + 1) % 10 == 0:
+                    acc_set = []
+                    avg_loss_set = []
+                    for test_data in test_reader():
+                        acc_np, avg_loss_np = exe.run(
+                            program=test_program,
+                            feed=feeder.feed(test_data),
+                            fetch_list=[acc, avg_loss])
+                        acc_set.append(float(acc_np))
+                        avg_loss_set.append(float(avg_loss_np))
+                    # get test acc and loss
+                    acc_val = numpy.array(acc_set).mean()
+                    avg_loss_val = numpy.array(avg_loss_set).mean()
                     print(
                         'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
-                        format(pass_id, batch_id + 1, 0.0, 0.0, float (time.clock())))
-                
-
-   # def train_loop(main_program):
-   #     exe.run(fluid.default_startup_program())
-
-   #     PASS_NUM = 1
-   #     for pass_id in range(PASS_NUM):
-   #         for batch_id, data in enumerate(train_reader()):
-   #             if (batch_id==21):
-   #                 break
-   #             # train a mini-batch, fetch nothing
-   #             exe.run(main_program, feed=feeder.feed(data))
-   #             if (batch_id + 1) % 10 == 0:
-   #                 acc_set = []
-   #                 avg_loss_set = []
-   #                 for test_data in test_reader():
-   #                     acc_np, avg_loss_np = exe.run(
-   #                         program=test_program,
-   #                         feed=feeder.feed(test_data),
-   #                         fetch_list=[acc, avg_loss])
-   #                     acc_set.append(float(acc_np))
-   #                     avg_loss_set.append(float(avg_loss_np))
-   #                 # get test acc and loss
-   #                 acc_val = numpy.array(acc_set).mean()
-   #                 avg_loss_val = numpy.array(avg_loss_set).mean()
-   #                 print(
-   #                     'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
-   #                     format(pass_id, batch_id + 1,
-   #                            float(avg_loss_val), float(acc_val), float (time.clock())))
-   #                 if math.isnan(float(avg_loss_val)):
-   #                     sys.exit("got NaN loss, training failed.")
-   #     if save_dirname is not None:
-   #         fluid.io.save_inference_model(
-   #         save_dirname, ["img"], [prediction],
-   #         exe,
-   #         model_filename=model_filename,
-   #         params_filename=params_filename)
-   #     return
-   #     #raise AssertionError("Loss of recognize digits is too large")
-   #     return
+                        format(pass_id, batch_id + 1, float(avg_loss_val), float(acc_val), float (time.clock())))
 
     if is_local:
         train_loop(fluid.default_main_program())
@@ -286,7 +261,7 @@ def inject_all_tests():
     #            inject_test_method(use_cuda, parallel, nn_type, True)
 
     # Two unit-test for saving parameters as separate files
-    #inject_test_method(True, False, 'mlp', False)
+    inject_test_method(True, True, 'mlp', False)
     inject_test_method(True, True, 'conv', False)
 
 

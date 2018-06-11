@@ -203,7 +203,7 @@ def train(net_type, use_cuda, parallel_do, parallel_exe, save_dirname, is_local)
                             #    sys.exit("got NaN loss, training failed.")
                             acc_list.append(float(acc_t))
                             avg_loss_list.append(float(loss_t))
-                            break  # Use 1 segment for speeding up CI
+                            #break  # Use 1 segment for speeding up CI
 
                         acc_value = np.array(acc_list).mean()
                         avg_loss_value = np.array(avg_loss_list).mean()
