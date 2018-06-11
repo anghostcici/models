@@ -23,6 +23,7 @@ import numpy as np
 import unittest
 import os
 import time
+import pdb
 
 def resnet_cifar10(input, depth=32):
     def conv_bn_layer(input, ch_out, filter_size, stride, padding, act='relu'):
@@ -169,6 +170,8 @@ def train(net_type, use_cuda, parallel_do, parallel_exe, save_dirname, is_local)
     train_reader_iter=train_reader()
     data=train_reader_iter.next()
     feed_data=feeder.feed(data)
+    fix_data_in_gpu= False
+
     def train_loop(main_program):
         if parallel_exe:
             exe = fluid.Executor(place)
@@ -176,23 +179,39 @@ def train(net_type, use_cuda, parallel_do, parallel_exe, save_dirname, is_local)
             exe = fluid.ParallelExecutor(loss_name=avg_cost.name, use_cuda=True, allow_op_delay=True)
             for pass_id in range(PASS_NUM):
                 for batch_id in range(100):
-                    exe.run([],feed_dict=feed_data)
+                    cost_val= exe.run(fetch_list=[avg_cost.name] if batch_id%10 == 0 else [] ,
+                                      feed_dict=feed_data if fix_data_in_gpu else feeder.feed(train_reader_iter.next()))
                     if (batch_id % 10) == 0:
                         print(
-                            'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
+                            'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.4}, Time {3:5.6}'.
                             format(pass_id, batch_id + 1,
-                                   0.0, 0.0, time.clock()))
+                                   np.array(cost_val[0])[0], time.clock()))
         else:
             exe = fluid.Executor(place)
             exe.run(fluid.default_startup_program())
             for pass_id in range(PASS_NUM):
                 for batch_id in range(100):
-                    exe.run(main_program, feed=feed_data)
+                    exe.run(main_program, feed=feed_data if fix_data_in_gpu else feeder.feed(train_reader_iter.next()))
                     if (batch_id % 10) == 0:
+                        acc_list = []
+                        avg_loss_list = []
+                        for tid, test_data in enumerate(test_reader()):
+                            loss_t, acc_t = exe.run(program=test_program,
+                                                    feed=feeder.feed(test_data),
+                                                    fetch_list=[avg_cost, acc])
+                            #if math.isnan(float(loss_t)):
+                            #    sys.exit("got NaN loss, training failed.")
+                            acc_list.append(float(acc_t))
+                            avg_loss_list.append(float(loss_t))
+                            break  # Use 1 segment for speeding up CI
+
+                        acc_value = np.array(acc_list).mean()
+                        avg_loss_value = np.array(avg_loss_list).mean()
+
                         print(
                             'PassID {0:1}, BatchID {1:04}, Test Loss {2:2.2}, Acc {3:2.2}, Time {4:5.6}'.
                             format(pass_id, batch_id + 1,
-                                   0.0, 0.0, time.clock()))
+                                   float(avg_loss_value), float(acc_value), time.clock()))
     if is_local:
         train_loop(fluid.default_main_program())
     else:
